@@ -1,0 +1,10 @@
+Package: com.vcnext.app
+Name: V4HCAM Next
+Description: V4HCAM Next camera control application for jailbroken iOS devices.
+Maintainer: V4HCAM
+Author: V4HCAM
+Section: Applications
+Depends: firmware (>= 15.0), mobilesubstrate
+Architecture: iphoneos-arm64
+Version: 0.16.73
+Installed-Size: 1528

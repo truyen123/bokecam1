@@ -416,7 +416,6 @@ static const CGFloat kBokeCamButtonMargin = 16.0;
             PHPickerViewController *picker =
                 [[PHPickerViewController alloc] initWithConfiguration:config];
             picker.delegate = self;
-            picker.allowsEditing = NO;
             picker.modalPresentationStyle = UIModalPresentationFullScreen;
             [presenter presentViewController:picker animated:YES completion:nil];
             return;

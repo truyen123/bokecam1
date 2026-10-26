@@ -37,7 +37,6 @@
 //
 
 #import "Tweak.h"
-#import "roothide.h"
 
 #import <objc/runtime.h>
 #import <objc/message.h>
@@ -105,17 +104,9 @@ static BOOL BokeCamFileExists(NSString *path) {
 // Directories that are usable from a jailbroken, sandboxed application.
 // Ordered by preference; the first writable one is used for storing data.
 //
-// RootHide does not install the jailbreak to a fixed path. The directory
-// (named jbroot) gets a random name on every jailbreak, therefore every path
-// has to be resolved through the `jbroot()` API of roothide.h. The API is a
-// no-op stub when the tweak is compiled for rootful / rootless.
-//
-// The paths below are therefore "jbroot based" paths, exactly what the
-// roothide API expects as its input.
-//
-// /var/mobile/Containers/Shared/App is the container that every app on a
-// jailbroken device can read, which makes it the most reliable place to
-// exchange data between two different applications.
+// These are plain iOS (rootfs) paths, NOT paths inside the jailbreak root, so
+// they must not be passed through jbroot(). That keeps the tweak independent
+// from the random jbroot directory name used by RootHide.
 static NSArray<NSString *> *BokeCamCandidateDirectories(void) {
     static NSArray<NSString *> *dirs = nil;
     static dispatch_once_t once;
@@ -136,32 +127,22 @@ static NSArray<NSString *> *BokeCamCandidateDirectories(void) {
     return dirs;
 }
 
-// Resolves a jbroot based path into the real path on this device. Falls back
-// to the unmodified path when the jailbreak API is not available (for
-// example when the tweak runs outside of a jailbroken environment).
-NSString *BokeCamJBRootPath(NSString *path) {
-    if (path.length == 0) {
-        return path;
+// Creates `dir` (world writable) when it does not exist yet. Returns YES when
+// the directory exists afterwards.
+static BOOL BokeCamEnsureDirectory(NSString *dir) {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    BOOL isDir = NO;
+    if ([fm fileExistsAtPath:dir isDirectory:&isDir]) {
+        return isDir;
     }
-    return jbroot(path);
-}
-
-// The candidate directories with the jailbreak root resolved. All file
-// system access has to use these, the raw list is only jbroot based.
-static NSArray<NSString *> *BokeCamResolvedDirectories(void) {
-    static NSArray<NSString *> *dirs = nil;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{
-        NSMutableArray<NSString *> *resolved = [NSMutableArray array];
-        for (NSString *candidate in BokeCamCandidateDirectories()) {
-            NSString *real = BokeCamJBRootPath(candidate);
-            if (real.length > 0 && ![resolved containsObject:real]) {
-                [resolved addObject:real];
-            }
-        }
-        dirs = [resolved copy];
-    });
-    return dirs;
+    if (![fm createDirectoryAtPath:dir
+       withIntermediateDirectories:YES
+                        attributes:@{NSFilePosixPermissions: @(0777)}
+                             error:NULL]) {
+        return NO;
+    }
+    [fm setAttributes:@{NSFilePosixPermissions: @(0777)} ofItemAtPath:dir error:NULL];
+    return YES;
 }
 
 // Creates the directory when needed and returns it when it is really writable.
@@ -172,16 +153,7 @@ static NSString *BokeCamWritableDirectory(void) {
     dispatch_once(&once, ^{
         NSFileManager *fm = [NSFileManager defaultManager];
         for (NSString *candidate in BokeCamCandidateDirectories()) {
-            if (![fm fileExistsAtPath:candidate]) {
-                if (![fm createDirectoryAtPath:candidate
-                    withIntermediateDirectories:YES
-                                     attributes:@{NSFilePosixPermissions: @(0777)}
-                                          error:NULL]) {
-                    continue;
-                }
-            }
-            BOOL isDir = NO;
-            if (![fm fileExistsAtPath:candidate isDirectory:&isDir] || !isDir) {
+            if (!BokeCamEnsureDirectory(candidate)) {
                 continue;
             }
             NSString *probe = [candidate stringByAppendingPathComponent:
@@ -968,65 +940,28 @@ static CMSampleBufferRef BokeCamCreateSampleBuffer(CMSampleBufferRef originalBuf
     // The format description of the original buffer describes the camera
     // pixel format. It must be re-created for the new buffer, otherwise the
     // consumer would read the old (unchanged) image.
-    CMFormatDescriptionRef originalFormat = CMSampleBufferGetFormatDescription(originalBuffer);
-    CMVideoFormatDescriptionRef videoFormat = NULL;
-    if (originalFormat != NULL &&
-        CMFormatDescriptionGetMediaType(originalFormat) == kCMMediaType_Video) {
-        videoFormat = (CMVideoFormatDescriptionRef)originalFormat;
-    }
-
-    CMFormatDescriptionRef formatDescription = NULL;
-    if (videoFormat != NULL) {
-        CMVideoFormatDescriptionRef created = NULL;
-        if (CMVideoFormatDescriptionCreateForImageBuffer(kCFAllocatorDefault,
-                                                         videoFormat,
-                                                         pixelBuffer,
-                                                         &created) == noErr &&
-            created != NULL) {
-            formatDescription = created;
-        }
-    }
-
-    if (formatDescription == NULL) {
-        // Fall back to a plain description for the pixel buffer.
-        CMFormatDescriptionRef fallback = NULL;
-        if (CMFormatDescriptionCreate(kCFAllocatorDefault,
-                                      kCMMediaType_Video,
-                                      0,
-                                      pixelBuffer,
-                                      &fallback) == noErr &&
-            fallback != NULL) {
-            formatDescription = fallback;
-        }
-    }
-
-    if (formatDescription == NULL) {
+    CMVideoFormatDescriptionRef formatDescription = NULL;
+    if (CMVideoFormatDescriptionCreateForImageBuffer(kCFAllocatorDefault,
+                                                     pixelBuffer,
+                                                     &formatDescription) != noErr ||
+        formatDescription == NULL) {
         CVPixelBufferRelease(pixelBuffer);
         return NULL;
     }
 
+    // Keep the original timing so the consumer sees a continuous stream.
     CMSampleTimingInfo timing;
-    CMSampleTimingInfo *timingArray = NULL;
-    size_t timingCount = 0;
-    OSStatus timingStatus = CMSampleBufferGetSampleTimingInfoArray(originalBuffer,
-                                                                     &timingArray,
-                                                                     &timingCount);
-    if (timingStatus == noErr && timingArray != NULL && timingCount > 0) {
-        timing = timingArray[0];
-        free(timingArray);
-    } else {
+    if (CMSampleBufferGetSampleTimingInfo(originalBuffer, 0, &timing) != noErr) {
         timing.duration = CMTimeMake(1, 30);
-        timing.presentationTimeStamp = CMTimeMake(0, 1);
+        timing.presentationTimeStamp = CMSampleBufferGetPresentationTimeStamp(originalBuffer);
         timing.decodeTimeStamp = kCMTimeInvalid;
     }
 
     CMSampleBufferRef newBuffer = NULL;
     OSStatus createStatus = CMSampleBufferCreateReadyWithImageBuffer(kCFAllocatorDefault,
-                                                                       NULL,
                                                                        pixelBuffer,
                                                                        formatDescription,
                                                                        &timing,
-                                                                       CMSampleBufferGetDataLength(originalBuffer),
                                                                        &newBuffer);
     CFRelease(formatDescription);
     CVPixelBufferRelease(pixelBuffer);
@@ -1044,7 +979,7 @@ static void BokeCamSwizzleSampleBufferDelegate(Class delegateClass, SEL selector
     if (delegateClass == Nil || selector == NULL) {
         return;
     }
-    if (![delegateClass respondsToSelector:selector]) {
+    if (![delegateClass instancesRespondToSelector:selector]) {
         return;
     }
 
@@ -1063,23 +998,18 @@ static void BokeCamSwizzleSampleBufferDelegate(Class delegateClass, SEL selector
         IMP originalIMP = method_getImplementation(method);
         gSwizzledIMPs[key] = [NSValue valueWithPointer:originalIMP];
 
-        void (^block)(id, SEL, AVCaptureOutput *, CMSampleBufferRef, AVCaptureConnection *) =
-        ^void(id obj, SEL cmd, AVCaptureOutput *out, CMSampleBufferRef buffer, AVCaptureConnection *conn) {
+        // imp_implementationWithBlock: blocks receive `self` first and NO
+        // selector argument.
+        void (^block)(id, AVCaptureOutput *, CMSampleBufferRef, AVCaptureConnection *) =
+        ^void(id obj, AVCaptureOutput *out, CMSampleBufferRef buffer, AVCaptureConnection *conn) {
+            typedef void (*OrigFn)(id, SEL, AVCaptureOutput *, CMSampleBufferRef, AVCaptureConnection *);
             CMSampleBufferRef replacement = BokeCamCreateSampleBuffer(buffer);
             if (replacement != NULL) {
-                ((void (*)(id, SEL, AVCaptureOutput *, CMSampleBufferRef, AVCaptureConnection *))originalIMP)(obj,
-                                                                                                          cmd,
-                                                                                                          out,
-                                                                                                          replacement,
-                                                                                                          conn);
+                ((OrigFn)originalIMP)(obj, selector, out, replacement, conn);
                 CFRelease(replacement);
                 return;
             }
-            ((void (*)(id, SEL, AVCaptureOutput *, CMSampleBufferRef, AVCaptureConnection *))originalIMP)(obj,
-                                                                                                          cmd,
-                                                                                                          out,
-                                                                                                          buffer,
-                                                                                                          conn);
+            ((OrigFn)originalIMP)(obj, selector, out, buffer, conn);
         };
 
         [gSwizzleBlocks addObject:block];
@@ -1094,7 +1024,7 @@ static void BokeCamSwizzlePhotoDelegate(Class delegateClass, SEL selector) {
     if (delegateClass == Nil || selector == NULL) {
         return;
     }
-    if (![delegateClass respondsToSelector:selector]) {
+    if (![delegateClass instancesRespondToSelector:selector]) {
         return;
     }
 
@@ -1113,14 +1043,11 @@ static void BokeCamSwizzlePhotoDelegate(Class delegateClass, SEL selector) {
         IMP originalIMP = method_getImplementation(method);
         gSwizzledIMPs[key] = [NSValue valueWithPointer:originalIMP];
 
-        void (^block)(id, SEL, AVCaptureOutput *, AVCapturePhoto *, NSError *) =
-        ^void(id obj, SEL cmd, AVCaptureOutput *out, AVCapturePhoto *photo, NSError *error) {
+        void (^block)(id, AVCapturePhotoOutput *, AVCapturePhoto *, NSError *) =
+        ^void(id obj, AVCapturePhotoOutput *out, AVCapturePhoto *photo, NSError *error) {
+            typedef void (*OrigFn)(id, SEL, AVCapturePhotoOutput *, AVCapturePhoto *, NSError *);
             BokeCamPreparePhoto(photo);
-            ((void (*)(id, SEL, AVCaptureOutput *, AVCapturePhoto *, NSError *))originalIMP)(obj,
-                                                                                            cmd,
-                                                                                            out,
-                                                                                            photo,
-                                                                                            error);
+            ((OrigFn)originalIMP)(obj, selector, out, photo, error);
         };
 
         [gSwizzleBlocks addObject:block];
@@ -1203,9 +1130,8 @@ static void BokeCamInstallSampleBufferCallbackSwizzle(void) {
         IMP originalIMP = method_getImplementation(method);
         gSwizzledIMPs[key] = [NSValue valueWithPointer:originalIMP];
 
-        void (^block)(id, SEL, id, dispatch_queue_t, void (^)(AVCaptureOutput *, CMSampleBufferRef)) =
+        void (^block)(id, id, dispatch_queue_t, void (^)(AVCaptureOutput *, CMSampleBufferRef)) =
         ^void(id obj,
-               SEL cmd,
                id delegate,
                dispatch_queue_t queue,
                void (^sampleBufferCallback)(AVCaptureOutput *, CMSampleBufferRef)) {
@@ -1233,7 +1159,7 @@ static void BokeCamInstallSampleBufferCallbackSwizzle(void) {
             }
 
             ((void (*)(id, SEL, id, dispatch_queue_t, void (^)(AVCaptureOutput *, CMSampleBufferRef)))originalIMP)(obj,
-                                                                                                               cmd,
+                                                                                                               selector,
                                                                                                                delegate,
                                                                                                                queue,
                                                                                                                sampleBufferCallback);
@@ -1264,7 +1190,7 @@ static void BokeCamInstallSampleBufferCallbackSwizzle(void) {
     if (replacement.length > 0) {
         return replacement;
     }
-    %orig;
+    return %orig;
 }
 
 %end

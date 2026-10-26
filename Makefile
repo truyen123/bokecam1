@@ -8,13 +8,8 @@ TARGET := iphone:clang:latest:14.0
 # use the arm64e ABI on iOS 14+).
 ARCHS = arm64 arm64e
 
-# RootHide package layout. RootHide mounts the jailbreak tree at /var/jb and
-# additionally uses /var/jb/var/jb as the "real" jailbreak root, so that
-# rootless paths keep working on top of it.
-#
-# Theos ships the `roothide` scheme for this. It installs the dylib into
-# /var/jb/usr/lib/TweakInject and the plist into
-# /var/jb/Library/MobileSubstrate/DynamicLibraries.
+# RootHide package layout. Requires the roothide/theos fork, which provides
+# the `roothide` package scheme (randomized jbroot prefix, arm64e package).
 THEOS_PACKAGE_SCHEME = roothide
 
 # Restart the Camera app after installation so the injected dylib is loaded

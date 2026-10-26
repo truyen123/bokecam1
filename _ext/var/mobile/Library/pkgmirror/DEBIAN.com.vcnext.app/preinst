@@ -1,0 +1,19 @@
+#!/bin/sh
+set -e
+
+ROOT_PREFIX="/var/jb"
+A13_CANARY_PACKAGE_FLAG="$ROOT_PREFIX/Library/MobileSubstrate/DynamicLibraries/VCNextA13CameraCanary.flag"
+machine="$(uname -m 2>/dev/null || true)"
+case "$machine" in
+    iPhone12,*)
+        # Keep the VCNext camera and overlay dylibs installed on A13 devices.
+        # fake + float control + color sync are all enabled on A13 (macOS/Xcode
+        # SDK build has correct ptrauth, so no PAC trap / SpringBoard hang).
+        # Only clear stale canary activation state.
+        rm -f \
+            "$A13_CANARY_PACKAGE_FLAG" \
+            "$ROOT_PREFIX/var/mobile/Library/VCNext/A13CameraCanary"
+        ;;
+esac
+
+exit 0

@@ -10,23 +10,21 @@ on:
 jobs:
   build:
     name: Build package (roothide)
-    runs-on: ubuntu-latest
+    # macOS ships the real Apple clang + Xcode SDK, so no cross toolchain
+    # download and no apt packages are needed.
+    runs-on: macos-14
 
     env:
-      THEOS: /opt/theos
+      THEOS: ${{ github.workspace }}/theos
       THEOS_PACKAGE_SCHEME: roothide
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          submodules: recursive
 
       - name: Locate the Theos project directory
         id: project
         run: |
-          # The Theos project can either sit in the repository root or in a
-          # "bokecam" sub directory. Detect it automatically.
           if [ -f "Makefile" ] && [ -f "Tweak.xm" ]; then
             echo "dir=." >> "$GITHUB_OUTPUT"
           elif [ -f "bokecam/Makefile" ] && [ -f "bokecam/Tweak.xm" ]; then
@@ -35,92 +33,32 @@ jobs:
             echo "::error::Could not find Makefile and Tweak.xm in the repository."
             exit 1
           fi
-          echo "Theos project directory: ${{ steps.project.outputs.dir }}"
 
-      - name: Install build dependencies
+      - name: Install build tools
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential \
-            curl \
-            fakeroot \
-            git \
-            libxml2 \
-            lzma \
-            make \
-            perl \
-            python3 \
-            rsync \
-            unzip \
-            wget \
-            xz-utils \
-            zip \
-            zstd
+          brew install ldid dpkg make xz
+          # Put GNU make 4.x first in PATH (macOS ships make 3.81).
+          echo "$(brew --prefix make)/libexec/gnubin" >> "$GITHUB_PATH"
 
-      - name: Install Theos
+      - name: Install RootHide Theos
+        # roothide/theos contains the `roothide` package scheme, the upstream
+        # theos/theos does not.
         run: |
-          git clone --recursive https://github.com/theos/theos.git "$THEOS"
-          sudo chown -R "$(whoami)" "$THEOS"
-          echo "Theos installed at $THEOS"
+          git clone --recursive --depth=1 https://github.com/roothide/theos.git "$THEOS"
 
-      - name: Install Theos iOS toolchain
-        # The cross compiler lives in $THEOS/toolchain/linux/iphone/bin.
-        # Without it the build fails with "clang: No such file or directory".
-        # This is the exact same prebuilt archive that the official
-        # $THEOS/bin/install-theos script downloads on Linux.
+      - name: Install iOS SDKs
         run: |
-          set -e
-          ARCH="$(uname -m)"
-          case "$ARCH" in
-            x86_64)  TOOLCHAIN_ARCH="x86_64" ;;
-            aarch64) TOOLCHAIN_ARCH="aarch64" ;;
-            *)
-              echo "::error::Unsupported build architecture: $ARCH"
-              exit 1
-              ;;
-          esac
-
-          echo "Downloading prebuilt iOS toolchain for $TOOLCHAIN_ARCH ..."
-          curl -fL --retry 3 \
-            "https://github.com/L1ghtmann/llvm-project/releases/latest/download/iOSToolchain-${TOOLCHAIN_ARCH}.tar.xz" \
-            -o /tmp/toolchain.tar.xz
-
-          mkdir -p "$THEOS/toolchain"
-          tar -xJf /tmp/toolchain.tar.xz -C "$THEOS/toolchain/"
-          rm -f /tmp/toolchain.tar.xz
-
-          sudo chown -R "$(whoami)" "$THEOS"
-
-      - name: Verify toolchain
-        run: |
-          CLANG="$THEOS/toolchain/linux/iphone/bin/clang"
-          if [ ! -x "$CLANG" ]; then
-            echo "::error::Theos toolchain clang is missing at $CLANG"
-            echo "::error::Contents of $THEOS/toolchain:"
-            find "$THEOS/toolchain" -maxdepth 3 -type d | head -n 30
-            exit 1
-          fi
-          "$CLANG" --version
-
-      - name: Install iOS SDK
-        run: |
-          # bin/install-sdk downloads the patched SDKs used by every target.
-          "$THEOS/bin/install-sdk" latest
+          git clone --depth=1 https://github.com/theos/sdks.git "$THEOS/sdks-tmp"
+          mkdir -p "$THEOS/sdks"
+          cp -R "$THEOS/sdks-tmp/"*.sdk "$THEOS/sdks/"
+          rm -rf "$THEOS/sdks-tmp"
           echo "--- installed SDKs ---"
           ls -1 "$THEOS/sdks"
-          if ! ls "$THEOS/sdks" | grep -q "iPhoneOS"; then
-            echo "::error::No iPhoneOS SDK was installed."
-            exit 1
-          fi
-
-      - name: Show build environment
-        run: |
-          echo "Theos version: $(git -C "$THEOS" log -1 --oneline)"
-          echo "Scheme: $THEOS_PACKAGE_SCHEME"
 
       - name: Build package
         run: |
           cd "${{ steps.project.outputs.dir }}"
+          make --version | head -n 1
           make clean
           make package FINALPACKAGE=1
 
@@ -128,8 +66,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: BokeCam-deb
-          path: |
-            ${{ steps.project.outputs.dir }}/packages/*.deb
+          path: ${{ steps.project.outputs.dir }}/packages/*.deb
           if-no-files-found: error
 
       - name: Package contents preview
@@ -138,6 +75,5 @@ jobs:
           for deb in packages/*.deb; do
             echo "===== $deb ====="
             dpkg-deb -I "$deb" || true
-            echo "----- files -----"
             dpkg-deb -c "$deb" || true
           done

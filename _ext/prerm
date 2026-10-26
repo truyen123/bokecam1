@@ -1,0 +1,10 @@
+#!/bin/sh
+
+PLIST="/Library/LaunchDaemons/com.vcnext.streamd.plist"
+NETWORK_PLIST="/Library/LaunchDaemons/com.vcnext.networkd.plist"
+if [ "$1" = "remove" ]; then
+    launchctl unload "$PLIST" 2>/dev/null || true
+    launchctl unload "$NETWORK_PLIST" 2>/dev/null || true
+fi
+
+exit 0

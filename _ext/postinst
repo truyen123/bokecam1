@@ -1,0 +1,76 @@
+#!/bin/sh
+
+ROOT_PREFIX="/var/jb"
+PLIST="$ROOT_PREFIX/Library/LaunchDaemons/com.vcnext.streamd.plist"
+NETWORK_PLIST="$ROOT_PREFIX/Library/LaunchDaemons/com.vcnext.networkd.plist"
+SHARED_DIR="$ROOT_PREFIX/var/mobile/Library/VCNext"
+A13_CANARY_PACKAGE_FLAG="$ROOT_PREFIX/Library/MobileSubstrate/DynamicLibraries/VCNextA13CameraCanary.flag"
+A13_CANARY_RUNTIME_MARKER="$SHARED_DIR/A13CameraCanary"
+
+mkdir -p "$SHARED_DIR/Media" "$SHARED_DIR/Streams"
+chown -R mobile:mobile "$SHARED_DIR" 2>/dev/null || true
+chmod -R u+rwX,go-rwx "$SHARED_DIR" 2>/dev/null || true
+
+# Keep camera replacement disarmed until the app writes a fresh configuration.
+rm -f \
+    "$SHARED_DIR/CameraConfig.plist" \
+    "$SHARED_DIR/CameraStatus.plist" \
+    "$SHARED_DIR/CapabilityLease.plist"
+
+# On upgrade, the app migrates the device signing key before discarding the old
+# build-bound session. A fresh install must never inherit an abandoned session.
+if [ -z "${2:-}" ]; then
+    rm -f "$SHARED_DIR/AuthSession.plist"
+fi
+
+# A13 (iPhone 11/SE2): always keep the camera dylib AND overlay (float control +
+# color sync), force a mediaserverd-only camera filter. The old A13_CANARY_PACKAGE_FLAG
+# gate deleted the dylib because the PAC trap made mediaserverd crash; with the
+# macOS/Xcode SDK build the ptrauth is correct, so the dylib + overlay are safe to
+# keep. The .roothidepatch markers MUST stay so RootHide's PatchLoader can finish
+# patching + re-signing the dylibs at boot.
+machine="$(uname -m 2>/dev/null || true)"
+case "$machine" in
+    iPhone12,*)
+        CAMERA_FILTER="$ROOT_PREFIX/Library/MobileSubstrate/DynamicLibraries/VCNextCamera.plist"
+        if [ -f "$ROOT_PREFIX/Library/MobileSubstrate/DynamicLibraries/VCNextCamera.dylib" ]; then
+            cat > "$CAMERA_FILTER" <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Filter</key>
+    <dict>
+        <key>Executables</key>
+        <array>
+            <string>mediaserverd</string>
+        </array>
+    </dict>
+</dict>
+</plist>
+EOF
+            chown root:wheel "$CAMERA_FILTER" 2>/dev/null || true
+            chmod 644 "$CAMERA_FILTER" 2>/dev/null || true
+        fi
+        ;;
+esac
+
+chown root:wheel "$PLIST" 2>/dev/null || true
+chmod 644 "$PLIST" 2>/dev/null || true
+chown root:wheel "$NETWORK_PLIST" 2>/dev/null || true
+chmod 644 "$NETWORK_PLIST" 2>/dev/null || true
+chown root:wheel "$ROOT_PREFIX/usr/libexec/VCNStreamDaemon" 2>/dev/null || true
+chmod 755 "$ROOT_PREFIX/usr/libexec/VCNStreamDaemon" 2>/dev/null || true
+chown root:wheel "$ROOT_PREFIX/usr/libexec/VCNNetworkDaemon" 2>/dev/null || true
+chmod 755 "$ROOT_PREFIX/usr/libexec/VCNNetworkDaemon" 2>/dev/null || true
+
+launchctl unload "$PLIST" 2>/dev/null || true
+launchctl load "$PLIST" 2>/dev/null || true
+uicache -p "$ROOT_PREFIX/Applications/VCNext.app" 2>/dev/null || true
+launchctl unload "$NETWORK_PLIST" 2>/dev/null || true
+launchctl load "$NETWORK_PLIST" 2>/dev/null || true
+
+# Restart mediaserverd so the camera dylib loads right away (no reboot needed).
+killall mediaserverd 2>/dev/null || true
+
+exit 0
