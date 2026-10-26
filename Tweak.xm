@@ -550,7 +550,7 @@ NSString *BokeCamStoreMediaData(NSData *data, NSString *fileName) {
         return;
     }
     CIImage *image = [CIImage imageWithContentsOfURL:url
-                                           options:@{ kCIImageApplyingOrientationProperty: @YES }
+                                           options:@{ kCIImageApplyOrientationProperty: @YES }
                                              error:NULL];
     if (image == nil) {
         // Fall back to UIImage, handles JPEG and PNG.
@@ -676,12 +676,12 @@ NSString *BokeCamStoreMediaData(NSData *data, NSString *fileName) {
         return image;
     }
     CGRect extent = image.extent;
-    if (extent.width <= 0 || extent.height <= 0) {
+    if (extent.size.width <= 0 || extent.size.height <= 0) {
         return image;
     }
-    CGFloat scale = MAX(size.width / extent.width, size.height / extent.height);
-    CGFloat scaledWidth = extent.width * scale;
-    CGFloat scaledHeight = extent.height * scale;
+    CGFloat scale = MAX(size.width / extent.size.width, size.height / extent.size.height);
+    CGFloat scaledWidth = extent.size.width * scale;
+    CGFloat scaledHeight = extent.size.height * scale;
 
     CIImage *scaled = [image imageByApplyingTransform:CGAffineTransformMakeScale(scale, scale)];
     CGFloat dx = (size.width - scaledWidth) * 0.5;
@@ -715,7 +715,7 @@ NSString *BokeCamStoreMediaData(NSData *data, NSString *fileName) {
     }
 
     CGRect extent = source.extent;
-    if (extent.width <= 0 || extent.height <= 0) {
+    if (extent.size.width <= 0 || extent.size.height <= 0) {
         return NULL;
     }
 
@@ -996,7 +996,7 @@ static void BokeCamSwizzleSampleBufferDelegate(Class delegateClass, SEL selector
         }
 
         IMP originalIMP = method_getImplementation(method);
-        gSwizzledIMPs[key] = [NSValue valueWithPointer:originalIMP];
+        gSwizzledIMPs[key] = [NSValue valueWithPointer:(const void *)originalIMP];
 
         // imp_implementationWithBlock: blocks receive `self` first and NO
         // selector argument.
@@ -1041,7 +1041,7 @@ static void BokeCamSwizzlePhotoDelegate(Class delegateClass, SEL selector) {
         }
 
         IMP originalIMP = method_getImplementation(method);
-        gSwizzledIMPs[key] = [NSValue valueWithPointer:originalIMP];
+        gSwizzledIMPs[key] = [NSValue valueWithPointer:(const void *)originalIMP];
 
         void (^block)(id, AVCapturePhotoOutput *, AVCapturePhoto *, NSError *) =
         ^void(id obj, AVCapturePhotoOutput *out, AVCapturePhoto *photo, NSError *error) {
@@ -1128,7 +1128,7 @@ static void BokeCamInstallSampleBufferCallbackSwizzle(void) {
         }
 
         IMP originalIMP = method_getImplementation(method);
-        gSwizzledIMPs[key] = [NSValue valueWithPointer:originalIMP];
+        gSwizzledIMPs[key] = [NSValue valueWithPointer:(const void *)originalIMP];
 
         void (^block)(id, id, dispatch_queue_t, void (^)(AVCaptureOutput *, CMSampleBufferRef)) =
         ^void(id obj,

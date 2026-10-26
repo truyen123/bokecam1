@@ -27,6 +27,12 @@ BokeCam_FRAMEWORKS = UIKit Foundation AVFoundation CoreMedia CoreVideo CoreImage
 BokeCam_CFLAGS = -fobjc-arc -Wno-deprecated-declarations -Wno-unused-function \
                  -Wno-unused-variable -Wno-nullability-completeness
 
+# The Photos / PhotosUI headers refuse to build without C++11 or later when
+# they are imported from an Objective-C++ (.mm / .xm) file. Theos reads the
+# C++ standard from CCFLAGS (C++) and OBJCCFLAGS (Objective-C++), so the
+# flag is set on all three variables to be safe.
 BokeCam_CXXFLAGS = -fobjc-arc -std=c++14
+BokeCam_CCFLAGS = -std=c++14
+BokeCam_OBJCCFLAGS = -std=c++14
 
 include $(THEOS_MAKE_PATH)/tweak.mk
