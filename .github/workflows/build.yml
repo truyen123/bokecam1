@@ -1,0 +1,104 @@
+name: Build BokeCam DEB
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build package (rootless)
+    runs-on: ubuntu-latest
+
+    env:
+      THEOS: /opt/theos
+      THEOS_PACKAGE_SCHEME: rootless
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Locate the Theos project directory
+        id: project
+        run: |
+          # The Theos project can either sit in the repository root or in a
+          # "bokecam" sub directory. Detect it automatically.
+          if [ -f "Makefile" ] && [ -f "Tweak.xm" ]; then
+            echo "dir=." >> "$GITHUB_OUTPUT"
+          elif [ -f "bokecam/Makefile" ] && [ -f "bokecam/Tweak.xm" ]; then
+            echo "dir=bokecam" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::Could not find Makefile and Tweak.xm in the repository."
+            exit 1
+          fi
+          echo "Theos project directory: ${{ steps.project.outputs.dir }}"
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            clang \
+            clang-format \
+            git \
+            gnupg2 \
+            libssl-dev \
+            lzma \
+            make \
+            perl \
+            python3 \
+            rsync \
+            unzip \
+            wget \
+            xz-utils \
+            zip \
+            zstd
+
+      - name: Install Theos
+        run: |
+          git clone --recursive https://github.com/theos/theos.git "$THEOS"
+          sudo chown -R "$(whoami)" "$THEOS"
+          echo "Theos installed at $THEOS"
+
+      - name: Install iOS SDK
+        run: |
+          cd "$THEOS"
+          # The theos/sdks repository ships the SDKs used by every target.
+          curl -fL https://github.com/theos/sdks/archive/refs/heads/master.zip -o /tmp/sdks.zip
+          unzip -q /tmp/sdks.zip -d /tmp
+          mkdir -p "$THEOS/sdks"
+          cp -R /tmp/sdks-master/iPhoneOS*.sdk "$THEOS/sdks/"
+          ls -1 "$THEOS/sdks"
+
+      - name: Show build environment
+        run: |
+          echo "Theos version: $(git -C "$THEOS" log -1 --oneline)"
+          echo "Scheme: $THEOS_PACKAGE_SCHEME"
+
+      - name: Build package
+        run: |
+          cd "${{ steps.project.outputs.dir }}"
+          make clean
+          make package FINALPACKAGE=1
+
+      - name: Upload .deb artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: BokeCam-deb
+          path: |
+            ${{ steps.project.outputs.dir }}/packages/*.deb
+          if-no-files-found: error
+
+      - name: Package contents preview
+        run: |
+          cd "${{ steps.project.outputs.dir }}"
+          for deb in packages/*.deb; do
+            echo "===== $deb ====="
+            dpkg-deb -I "$deb" || true
+            echo "----- files -----"
+            dpkg-deb -c "$deb" || true
+          done

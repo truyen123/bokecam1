@@ -1,0 +1,42 @@
+{
+    Filter = {
+        Bundles = (
+            "com.apple.UIKit",
+            "com.apple.camera",
+            "com.apple.Camera",
+            "com.apple.mobileslideshow",
+            "com.apple.FaceTime",
+            "com.apple.MobileSMS",
+            "com.apple.mobilemail",
+            "com.apple.MobileSafari",
+            "com.zing.zalo",
+            "com.facebook.Facebook",
+            "com.facebook.Messenger",
+            "com.facebook.Whatsapp",
+            "com.whatsapp.WhatsApp",
+            "net.whatsapp.WhatsApp",
+            "com.burbn.instagram",
+            "com.ss.iphone.ugc.aweme",
+            "com.tiktok.generic",
+            "com.snapchat.snapchat",
+            "org.telegram.Telegram-iOS",
+            "com.tencent.xin",
+            "com.viber",
+            "mobileapp.acb.com.vn",
+            "com.vnpay.EximBankOmni",
+            "com.mbmobile",
+            "pgbankapp.pgbank.com.vn",
+            "com.fpt.tpb.emobile",
+            "com.vietcombank.VCB",
+            "com.techcombank.mobile",
+            "com.bidv.SmartBanking",
+            "com.agribank.E-MobileBanking",
+            "com.vpbank.online",
+            "com.mservice.momo",
+            "vn.com.zalopay"
+        );
+        Executables = (
+            "mediaserverd"
+        );
+    };
+}

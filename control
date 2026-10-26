@@ -1,0 +1,12 @@
+Package: com.bokecam.tweak
+Name: BokeCam
+Version: 1.0.0
+Architecture: iphoneos-arm64
+Description: System wide virtual camera (VCam) tweak for jailbroken iOS. Replaces the frames produced by AVCaptureVideoDataOutput and AVCapturePhotoOutput with a still image or a looping video chosen from the photo library, controlled from a floating button injected into every application.
+Maintainer: BokeCam Developer <bokecam@example.com>
+Author: BokeCam Developer
+Section: Tweaks
+Depends: mobilesubstrate (>= 0.9.5000), firmware (>= 14.0)
+Tag: role::hacker
+Homepage: https://github.com/bokecam/BokeCam
+Installed-Size: 480
