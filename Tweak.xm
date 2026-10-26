@@ -550,8 +550,7 @@ NSString *BokeCamStoreMediaData(NSData *data, NSString *fileName) {
         return;
     }
     CIImage *image = [CIImage imageWithContentsOfURL:url
-                                           options:@{ kCIImageApplyOrientationProperty: @YES }
-                                             error:NULL];
+                                             options:@{ kCIImageApplyOrientationProperty: @YES }];
     if (image == nil) {
         // Fall back to UIImage, handles JPEG and PNG.
         UIImage *uiImage = [UIImage imageWithContentsOfFile:url.path];

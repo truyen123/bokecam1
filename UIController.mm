@@ -487,7 +487,7 @@ static const CGFloat kBokeCamButtonMargin = 16.0;
         return;
     }
 
-    __weak typeof(self) weakSelf = self;
+    __weak UIController *weakSelf = self;
     [provider loadObjectOfClass:[UIImage class]
               completionHandler:^(__unused id<NSItemProviderReading> object, NSError *error) {
         UIImage *image = [object isKindOfClass:[UIImage class]] ? (UIImage *)object : nil;
@@ -508,7 +508,7 @@ static const CGFloat kBokeCamButtonMargin = 16.0;
         return;
     }
 
-    __weak typeof(self) weakSelf = self;
+    __weak UIController *weakSelf = self;
     [provider loadFileRepresentationForTypeIdentifier:identifier
                                     completionHandler:^(NSURL *url, NSError *error) {
         if (url == nil) {
