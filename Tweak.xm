@@ -37,10 +37,12 @@
 //
 
 #import "Tweak.h"
+#import "roothide.h"
 
 #import <objc/runtime.h>
 #import <objc/message.h>
 #import <unistd.h>
+#import <stdlib.h>
 #import <CoreImage/CoreImage.h>
 #import <ImageIO/ImageIO.h>
 
@@ -102,18 +104,62 @@ static BOOL BokeCamFileExists(NSString *path) {
 
 // Directories that are usable from a jailbroken, sandboxed application.
 // Ordered by preference; the first writable one is used for storing data.
+//
+// RootHide does not install the jailbreak to a fixed path. The directory
+// (named jbroot) gets a random name on every jailbreak, therefore every path
+// has to be resolved through the `jbroot()` API of roothide.h. The API is a
+// no-op stub when the tweak is compiled for rootful / rootless.
+//
+// The paths below are therefore "jbroot based" paths, exactly what the
+// roothide API expects as its input.
+//
+// /var/mobile/Containers/Shared/App is the container that every app on a
+// jailbroken device can read, which makes it the most reliable place to
+// exchange data between two different applications.
 static NSArray<NSString *> *BokeCamCandidateDirectories(void) {
     static NSArray<NSString *> *dirs = nil;
     static dispatch_once_t once;
     dispatch_once(&once, ^{
         NSString *home = NSHomeDirectory();
         dirs = @[
+            // Shared container, readable by every app.
+            @"/var/mobile/Containers/Shared/App/BokeCam",
+            // Media / library directories.
             @"/var/mobile/Media/BokeCam",
             @"/var/mobile/Library/BokeCam",
             @"/var/tmp/BokeCam",
+            // Sandboxed fall backs, only usable inside the own app.
             [home stringByAppendingPathComponent:@"Documents/BokeCam"],
             [home stringByAppendingPathComponent:@"Library/BokeCam"],
         ];
+    });
+    return dirs;
+}
+
+// Resolves a jbroot based path into the real path on this device. Falls back
+// to the unmodified path when the jailbreak API is not available (for
+// example when the tweak runs outside of a jailbroken environment).
+NSString *BokeCamJBRootPath(NSString *path) {
+    if (path.length == 0) {
+        return path;
+    }
+    return jbroot(path);
+}
+
+// The candidate directories with the jailbreak root resolved. All file
+// system access has to use these, the raw list is only jbroot based.
+static NSArray<NSString *> *BokeCamResolvedDirectories(void) {
+    static NSArray<NSString *> *dirs = nil;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        NSMutableArray<NSString *> *resolved = [NSMutableArray array];
+        for (NSString *candidate in BokeCamCandidateDirectories()) {
+            NSString *real = BokeCamJBRootPath(candidate);
+            if (real.length > 0 && ![resolved containsObject:real]) {
+                [resolved addObject:real];
+            }
+        }
+        dirs = [resolved copy];
     });
     return dirs;
 }
@@ -476,6 +522,12 @@ NSString *BokeCamStoreMediaData(NSData *data, NSString *fileName) {
 - (instancetype)initWithMediaPath:(NSString *)path mediaType:(BokeCamMediaType)type;
 - (BOOL)isUsable;
 - (CGSize)naturalSize;
+// Returns the current frame. For videos the reader is advanced, for still
+// images the decoded image is returned.
+- (CIImage *)sourceImage;
+// Scales an image so that it fills the given size while keeping the aspect
+// ratio of the source.
+- (CIImage *)image:(CIImage *)image scaledToFill:(CGSize)size;
 // Creates a pixel buffer that matches the pixel format / size of `template`.
 - (CVPixelBufferRef)createPixelBufferMatching:(CVPixelBufferRef)templateBuffer;
 // Creates a BGRA pixel buffer of an explicit size.

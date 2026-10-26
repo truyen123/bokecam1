@@ -9,12 +9,12 @@ on:
 
 jobs:
   build:
-    name: Build package (rootless)
+    name: Build package (roothide)
     runs-on: ubuntu-latest
 
     env:
       THEOS: /opt/theos
-      THEOS_PACKAGE_SCHEME: rootless
+      THEOS_PACKAGE_SCHEME: roothide
 
     steps:
       - name: Checkout repository
@@ -42,11 +42,10 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             build-essential \
-            clang \
-            clang-format \
+            curl \
+            fakeroot \
             git \
-            gnupg2 \
-            libssl-dev \
+            libxml2 \
             lzma \
             make \
             perl \
@@ -64,15 +63,55 @@ jobs:
           sudo chown -R "$(whoami)" "$THEOS"
           echo "Theos installed at $THEOS"
 
+      - name: Install Theos iOS toolchain
+        # The cross compiler lives in $THEOS/toolchain/linux/iphone/bin.
+        # Without it the build fails with "clang: No such file or directory".
+        # This is the exact same prebuilt archive that the official
+        # $THEOS/bin/install-theos script downloads on Linux.
+        run: |
+          set -e
+          ARCH="$(uname -m)"
+          case "$ARCH" in
+            x86_64)  TOOLCHAIN_ARCH="x86_64" ;;
+            aarch64) TOOLCHAIN_ARCH="aarch64" ;;
+            *)
+              echo "::error::Unsupported build architecture: $ARCH"
+              exit 1
+              ;;
+          esac
+
+          echo "Downloading prebuilt iOS toolchain for $TOOLCHAIN_ARCH ..."
+          curl -fL --retry 3 \
+            "https://github.com/L1ghtmann/llvm-project/releases/latest/download/iOSToolchain-${TOOLCHAIN_ARCH}.tar.xz" \
+            -o /tmp/toolchain.tar.xz
+
+          mkdir -p "$THEOS/toolchain"
+          tar -xJf /tmp/toolchain.tar.xz -C "$THEOS/toolchain/"
+          rm -f /tmp/toolchain.tar.xz
+
+          sudo chown -R "$(whoami)" "$THEOS"
+
+      - name: Verify toolchain
+        run: |
+          CLANG="$THEOS/toolchain/linux/iphone/bin/clang"
+          if [ ! -x "$CLANG" ]; then
+            echo "::error::Theos toolchain clang is missing at $CLANG"
+            echo "::error::Contents of $THEOS/toolchain:"
+            find "$THEOS/toolchain" -maxdepth 3 -type d | head -n 30
+            exit 1
+          fi
+          "$CLANG" --version
+
       - name: Install iOS SDK
         run: |
-          cd "$THEOS"
-          # The theos/sdks repository ships the SDKs used by every target.
-          curl -fL https://github.com/theos/sdks/archive/refs/heads/master.zip -o /tmp/sdks.zip
-          unzip -q /tmp/sdks.zip -d /tmp
-          mkdir -p "$THEOS/sdks"
-          cp -R /tmp/sdks-master/iPhoneOS*.sdk "$THEOS/sdks/"
+          # bin/install-sdk downloads the patched SDKs used by every target.
+          "$THEOS/bin/install-sdk" latest
+          echo "--- installed SDKs ---"
           ls -1 "$THEOS/sdks"
+          if ! ls "$THEOS/sdks" | grep -q "iPhoneOS"; then
+            echo "::error::No iPhoneOS SDK was installed."
+            exit 1
+          fi
 
       - name: Show build environment
         run: |
